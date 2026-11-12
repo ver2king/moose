@@ -97,7 +97,12 @@ public:
   /// doubled in length.  The tip of this new vector is the neighbor centroid.
   /// This is important for FV dirichlet BCs.
   const Point & elemCentroid() const { return _elem_info->centroid(); }
-  const Point & neighborCentroid() const;
+
+  const Point & neighborCentroid() const
+  {
+    mooseAssert(_neighbor_info, "No neighbor");
+    return _periodic ? _periodic_neighbor_centroid : _neighbor_info->centroid();
+  }
   ///@}
 
   ///@{
@@ -171,6 +176,28 @@ public:
    */
   void computeBoundaryCoefficients();
 
+  /**
+   * Compute interpolation/gradient coefficients for a face whose neighbor lies across a
+   * periodic boundary. The face is treated as an interior face, but the neighbor centroid is
+   * replaced by its image on this side of the periodic pair.
+   * @param neighbor_info        ElemInfo of the element on the far side of the pair
+   * @param translated_centroid  neighbor centroid mapped back onto this side (x_N')
+   * @param neighbor_side        side of the neighbor coinciding (after mapping) with this face
+   */
+  void computePeriodicCoefficients(const ElemInfo * neighbor_info,
+                                   const Point & translated_centroid,
+                                   unsigned int neighbor_side);
+
+  /// Whether this face couples two elements across a periodic boundary
+  bool isPeriodic() const { return _periodic; }
+
+  /// image = physical + periodicOffset(); zero for non-periodic faces
+  const RealVectorValue & periodicOffset() const { return _periodic_offset; }
+
+  /// Periodic sideset ids this face was built from; deliberately NOT in boundaryIDs()
+  const std::set<BoundaryID> & periodicBoundaryIDs() const { return _periodic_boundary_ids; }
+  std::set<BoundaryID> & periodicBoundaryIDs() { return _periodic_boundary_ids; }
+
 private:
   /// Getter for the face type for every stored variable.
   /// This will be a friend of MooseMesh to make sure we can only access it from there.
@@ -212,8 +239,18 @@ private:
   /// the set of boundary ids that this face is associated with
   std::set<BoundaryID> _boundary_ids;
 
+  void computeCoefficientsFromNeighborCentroid(const Point & neighbor_centroid);
+
+  Point _periodic_neighbor_centroid;
+  Point _skewness_correction_vector;
+  RealVectorValue _periodic_offset;
+  std::set<BoundaryID> _periodic_boundary_ids;
+
   /// Allows access to private members from moose mesh only
   friend MooseMesh;
+
+public:
+  bool _periodic = false;
 };
 
 inline const Elem &
@@ -241,15 +278,6 @@ FaceInfo::faceType(const std::pair<unsigned int, unsigned int> & var_sys)
   mooseAssert(var_sys.first < _face_types_by_var[var_sys.second].size(),
               "Variable number out of bounds!");
   return _face_types_by_var[var_sys.second][var_sys.first];
-}
-
-inline const Point &
-FaceInfo::neighborCentroid() const
-{
-  mooseAssert(_neighbor_info,
-              "The neighbor is not defined on this faceInfo! A possible explanation is that the "
-              "face is a (physical/processor) boundary face.");
-  return _neighbor_info->centroid();
 }
 
 inline SubdomainID

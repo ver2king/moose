@@ -92,6 +92,11 @@ protected:
   bool onBoundary(const FaceInfo & fi) const;
 
   /**
+   * 
+   */
+  bool isPeriodic(const FaceInfo & fi) const;
+
+  /**
    * @return an element argument corresponding to the face info elem
    */
   Moose::ElemArg elemArg(bool correct_skewness = false) const;

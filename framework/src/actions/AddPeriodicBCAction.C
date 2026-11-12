@@ -150,11 +150,11 @@ AddPeriodicBCAction::getVariables() const
                        "' is a scalar variable and does not support a periodic boundary condition");
       if (!_problem->hasVariable(var_name))
         paramError("variable", "Variable '" + var_name + "' not found");
-      if (_problem->getVariable(0, var_name).isFV())
-        paramError("variable",
-                   "Variable '" + var_name +
-                       "' is a finite volume variable and does not support a periodic boundary "
-                       "condition.");
+      //if (_problem->getVariable(0, var_name).isFV())
+      //paramError("variable",
+      //           "Variable '" + var_name +
+      //               "' is a finite volume variable and does not support a periodic boundary "
+      //               "condition.");
     }
   }
   // Variable is not set, use all nonlinear variables that are non-scalar and non-FV

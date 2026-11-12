@@ -49,9 +49,18 @@ loopOverElemFaceInfo(const Elem & elem,
 
   for (const auto side : elem.side_index_range())
   {
-    const Elem * const candidate_neighbor = elem.neighbor_ptr(side);
+    // FIXME: Detect periodic BCs and correct way to find candidate_neighbor 
+    const Elem * candidate_neighbor = elem.neighbor_ptr(side);
+    /* if (!candidate_neighbor && mesh.hasPeriodicBoundaries() == true)
+    { 
+      mooseInfo("This elem and its neighbor have periodic BCs. ");
+      // FIXME: Gather all relevant variables inside here 
+      const libMesh::PeriodicBoundaries * pbs = mesh.getPeriodicBoundaries();
+      // FIXME: 0 here is fix coded. Otherwise back to MooseMesh to crreate new "findPeriodicNeighbor"
+      candidate_neighbor = elem.topological_neighbor(0, mesh, *mesh.getPointLocator(), pbs);
+    } */
 
-    bool elem_has_info = elemHasFaceInfo(elem, candidate_neighbor);
+    // bool elem_has_info = elemHasFaceInfo(elem, candidate_neighbor);
 
     std::set<const Elem *> neighbors;
 
@@ -82,11 +91,30 @@ loopOverElemFaceInfo(const Elem & elem,
 
     for (const Elem * const neighbor : neighbors)
     {
-      const FaceInfo * const fi =
+      /* const FaceInfo * fi =
           elem_has_info ? mesh.faceInfo(&elem, side)
-                        : mesh.faceInfo(neighbor, neighbor->which_neighbor_am_i(&elem));
+                        : mesh.faceInfo(neighbor, neighbor->which_neighbor_am_i(&elem)); */
 
+      const FaceInfo * fi = mesh.faceInfo(&elem, side);
+      if (!fi)
+      { 
+        mooseAssert(neighbor && neighbor != libMesh::remote_elem,
+              "No FaceInfo keyed by (elem, side) and no local neighbor to look through");
+        fi = mesh.faceInfo(neighbor, neighbor->which_neighbor_am_i(&elem));
+      }
       mooseAssert(fi, "We should have found a FaceInfo");
+      
+      // Orientation from the FaceInfo itself
+      const bool elem_has_info = (&fi->elem() == &elem);
+      mooseAssert(elem_has_info || &elem == fi->neighborPtr(),
+            "elem is neither the FaceInfo's elem nor its neighbor");
+
+      // The cell across, from the FaceInfo (nullptr only for true boundary faces)
+      const Elem * const face_neighbor = elem_has_info ? fi->neighborPtr() : &fi->elem();
+      mooseAssert(!neighbor || neighbor == libMesh::remote_elem || neighbor == face_neighbor,
+            "FaceInfo neighbor disagrees with the mesh neighbor");
+
+      // FIXME: these asserts need to be analyzed or re-implementation above is required to pass this assert
       mooseAssert(elem_has_info ? &elem == &fi->elem() : &elem == fi->neighborPtr(),
                   "Doesn't seem like we understand how this FaceInfo thing is working");
       if (neighbor)
@@ -104,8 +132,10 @@ loopOverElemFaceInfo(const Elem & elem,
       MooseMeshUtils::coordTransformFactor(fi->faceCentroid(), coord, coord_type, rz_radial_coord);
 
       const Point surface_vector = elem_normal * fi->faceArea() * coord;
-
-      act(elem, neighbor, fi, surface_vector, coord, elem_has_info);
+      
+      // FIXME: Replace neighbor via face_neighbor that counts for periodic BCs ? Or keep neighbor
+      // mooseWarning("Action is performed via face_neighbor in replacement of neighbor. ");
+      act(elem, face_neighbor, fi, surface_vector, coord, elem_has_info);
     }
   }
 }

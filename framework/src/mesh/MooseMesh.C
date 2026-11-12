@@ -3837,6 +3837,120 @@ MooseMesh::getPointLocator() const
   return getMesh().sub_point_locator();
 }
 
+bool MooseMesh::hasPeriodicBoundaries() const
+{
+  const libMesh::PeriodicBoundaries * pbs = nullptr;
+  {
+    auto & fep = _app.feProblem();
+    for (const auto i : make_range(fep.numSolverSystems()))
+    {
+      const auto * const p = fep.getSolverSystem(i).dofMap().get_periodic_boundaries();
+      if (!p || p->empty())
+        continue;
+      if (pbs && pbs != p)
+        mooseError("FV periodic boundaries must be identical across solver systems. ");
+      pbs = p;
+    }
+  }
+  if (pbs) { mooseInfo("Periodic BCs detected. "); return true; }
+  else { return false; };
+}
+
+const libMesh::PeriodicBoundaries * MooseMesh::getPeriodicBoundaries() const
+{ 
+  const libMesh::PeriodicBoundaries * pbs = nullptr;
+  auto & fep = _app.feProblem();
+  for (const auto i : make_range(fep.numSolverSystems()))
+  {
+    const auto * const p = fep.getSolverSystem(i).dofMap().get_periodic_boundaries();
+    if (!p || p->empty())
+      continue;
+    if (pbs && pbs != p)
+      mooseError("FV periodic boundaries must be identical across solver systems. ");
+    pbs = p;
+  };
+  return pbs;
+}
+
+MooseMesh::PeriodicNeighborInfo
+MooseMesh::findPeriodicNeighbor(const Elem & elem,
+                                const unsigned int side,
+                                const libMesh::PeriodicBoundaries & pbs,
+                                libMesh::PointLocatorBase & point_locator) const
+{
+  PeriodicNeighborInfo out;
+
+  if (elem.neighbor_ptr(side))          // has a real/remote neighbor: not a boundary side
+    return out;
+
+  std::vector<boundary_id_type> bids;
+  getMesh().get_boundary_info().boundary_ids(&elem, side, bids);
+
+  for (const auto bid : bids)
+  {
+    const auto * const pb = pbs.boundary(bid);
+    if (!pb)
+      continue;                                              // not a periodic sideset
+
+    const auto * const inv_pb = pbs.boundary(pb->pairedboundary);   // T^{-1}
+    if (!inv_pb)
+      mooseError("Periodic boundary ", bid, " has no inverse entry; register pairs through "
+                 "DofMap::add_periodic_boundary");
+
+    const Elem * const nb = elem.topological_neighbor(side, getMesh(), point_locator, &pbs);
+
+    if (!nb || nb == libMesh::remote_elem)
+    {
+      if (elem.processor_id() == processor_id())
+        mooseError("Could not find the periodic neighbor of element ", elem.id(), " across side ",
+                   side, " (boundary '", getBoundaryString(bid), "'). On a distributed mesh "
+                   "this means the element across the periodic boundary is not ghosted.");
+      return out;                      
+    }
+    if (!nb->active())
+      mooseError("Element ", elem.id(), " faces a refined element across periodic boundary '",
+                 getBoundaryString(bid), "'; refinement mismatch across periodic boundaries "
+                 "is not supported for finite volume.");
+
+    out.neighbor = nb;
+    out.my_id = bid;
+    out.paired_id = pb->pairedboundary;
+    out.translated_centroid = inv_pb->get_corresponding_pos(nb->vertex_average());
+
+    // Which side of nb is our face? The one tagged paired_id that contains T(x_f).
+    libMesh::ElemSideBuilder side_builder;
+    const Point xf_image = pb->get_corresponding_pos(side_builder(elem, side).vertex_average());
+    for (const auto ns : nb->side_index_range())
+    {
+      if (nb->neighbor_ptr(ns))
+        continue;
+      if (!getMesh().get_boundary_info().has_boundary_id(nb, ns, out.paired_id))
+        continue;
+      if (side_builder(*nb, ns).contains_point(xf_image, libMesh::TOLERANCE))
+      {
+        out.neighbor_side = ns;
+        break;
+      }
+    }
+    if (out.neighbor_side == libMesh::invalid_uint)
+      mooseError("Periodic neighbor ", nb->id(), " of element ", elem.id(), " side ", side,
+                 " has no side on boundary '", getBoundaryString(out.paired_id),
+                 "' containing the image of the face centroid; the periodic surfaces are not "
+                 "conforming under the given transformation.");
+    return out;
+  }
+  return out;
+}
+
+const Elem *
+MooseMesh::periodicNeighbor(const Elem & elem, const unsigned int side) const
+{
+  const FaceInfo * const fi = faceInfo(&elem, side);
+  if (!fi || !fi->isPeriodic())
+    return nullptr;
+  return (&fi->elem() == &elem) ? fi->neighborPtr() : &fi->elem();
+}
+
 void
 MooseMesh::buildFiniteVolumeInfo() const
 {
@@ -3844,7 +3958,7 @@ MooseMesh::buildFiniteVolumeInfo() const
               "This routine has not been implemented for threads. Please query this routine before "
               "a threaded region or contact a MOOSE developer to discuss.");
   _finite_volume_info_dirty = false;
-
+  
   using Keytype = std::pair<const Elem *, unsigned short int>;
 
   // create a map from elem/side --> boundary ids
@@ -3873,6 +3987,31 @@ MooseMesh::buildFiniteVolumeInfo() const
   auto begin = getMesh().active_elements_begin();
   auto end = getMesh().active_elements_end();
 
+  // FIXME: We init the periodic BCs pointers here 
+  const libMesh::PeriodicBoundaries * pbs = nullptr;
+  {
+    auto & fep = _app.feProblem();
+    for (const auto i : make_range(fep.numSolverSystems()))
+    {
+      const auto * const p = fep.getSolverSystem(i).dofMap().get_periodic_boundaries();
+      if (!p || p->empty())
+        { mooseWarning("p.size = 0. "); continue; }
+      if (pbs && pbs != p)
+        mooseError("FV periodic boundaries must be identical across solver systems. ");
+      pbs = p;
+    }
+  }
+    
+  std::unique_ptr<libMesh::PointLocatorBase> point_locator;
+  if (pbs)
+  { 
+    mooseInfo("Total PeriodicBoundaryBase objects = ", pbs->size());
+    point_locator = getPointLocator();
+    point_locator->enable_out_of_mesh_mode();   // return nullptr instead of erroring
+  } else { mooseWarning("libmesh::PeriodicBoundaries remains nullptr, size = 0. "); }
+  // -------------------------------------------------------------------------------------
+
+
   // We prepare a map connecting the Elem* and the corresponding ElemInfo
   // for the active elements.
   _elem_to_elem_info.reserve(nActiveLocalElem());
@@ -3889,12 +4028,21 @@ MooseMesh::buildFiniteVolumeInfo() const
 
   _all_face_info.reserve(num_sides / 2);
   dof_id_type face_index = 0;
+
+
   for (const Elem * elem : as_range(begin, end))
   {
     for (unsigned int side = 0; side < elem->n_sides(); ++side)
     {
       // get the neighbor element
       const Elem * neighbor = elem->neighbor_ptr(side);
+      PeriodicNeighborInfo periodic;
+      
+      if (!neighbor && pbs)
+      {
+        periodic = findPeriodicNeighbor(*elem, side, *pbs, *point_locator);
+        neighbor = periodic.neighbor;
+      }
 
       // Check if the FaceInfo shall belong to the element. If yes,
       // create and initialize the FaceInfo. We need this to ensure that
@@ -3907,9 +4055,9 @@ MooseMesh::buildFiniteVolumeInfo() const
 
         // We construct the faceInfo using the elementinfo and side index
         mooseAssert(elem->default_order() < 4, "Did not expect such high element orders in FV");
+        mooseInfo("Assemble elem with ID = ", elem->id());
         _all_face_info.emplace_back(
             &_elem_to_elem_info[elem->id()], side, face_index++, side_builder);
-
         auto & fi = _all_face_info.back();
 
         // get all the sidesets that this face is contained in and cache them
@@ -3922,6 +4070,9 @@ MooseMesh::buildFiniteVolumeInfo() const
         // cell and use it to compute the weights corresponding to the faceInfo.
         if (!neighbor || neighbor == libMesh::remote_elem)
           fi.computeBoundaryCoefficients();
+        else if (periodic)
+          fi.computePeriodicCoefficients(&_elem_to_elem_info.at(neighbor->id()),
+                                     periodic.translated_centroid, periodic.neighbor_side);
         else
           fi.computeInternalCoefficients(&_elem_to_elem_info[neighbor->id()]);
 
@@ -3935,9 +4086,18 @@ MooseMesh::buildFiniteVolumeInfo() const
           if (rit != side_map.end())
             boundary_ids.insert(rit->second.begin(), rit->second.end());
         }
-      }
-    }
-  }
+
+        if (periodic)
+        {
+          boundary_ids.erase(periodic.my_id);
+          boundary_ids.erase(periodic.paired_id);
+          fi.periodicBoundaryIDs() = {periodic.my_id, periodic.paired_id};
+        }
+      } // end if (elemHasFaceInfo)
+    } // end side loop
+  } // end elem loop
+
+  mooseInfo("Number of FIs found = ", _all_face_info.size());
 
   // Build the local face info and elem_side to face info maps. We need to do this after
   // _all_face_info is finished being constructed because emplace_back invalidates all iterators and
@@ -3955,6 +4115,15 @@ MooseMesh::buildFiniteVolumeInfo() const
 #endif
         _elem_side_to_face_info.emplace(std::make_pair(elem, side), &fi);
     mooseAssert(pair_it.second, "We should be adding unique FaceInfo objects.");
+
+    // Now add periodic BCs here 
+    // FIXME: It seems elem & side data is readily added into FaceInfo if periodic/ 
+    // FIXME: This method is never called, intend to replace 
+    if (fi.isPeriodic())
+    { 
+      mooseInfo("Moose mesh assembles FI with periodic BCs. ");
+      _elem_side_to_face_info.emplace(std::make_pair(fi.neighborPtr(), fi.neighborSideID()), &fi);
+    }
 
     // We will add the faces on processor boundaries to the list of face infos on each
     // associated processor.
@@ -4188,7 +4357,7 @@ MooseMesh::cacheFVElementalDoFs() const
 
 void
 MooseMesh::setupFiniteVolumeMeshData() const
-{
+{ 
   buildFiniteVolumeInfo();
   computeFiniteVolumeCoords();
   cacheFaceInfoVariableOwnership();

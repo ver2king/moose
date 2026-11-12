@@ -1571,6 +1571,44 @@ public:
    */
   bool possiblyRebuildNodeToElemMap();
 
+/* public:
+  bool _has_periodic_bcs; 
+  // FIXME: variable to determine whether mesh has periodic BCs
+  // it seems in current implemetation this must return const */
+
+public:
+  bool hasPeriodicBoundaries() const;
+  const libMesh::PeriodicBoundaries * getPeriodicBoundaries() const;
+
+public:
+  /// Result of looking across a periodic boundary from (elem, side)
+  struct PeriodicNeighborInfo
+  {
+    const Elem * neighbor = nullptr;                       // N, or nullptr if side isn't periodic
+    unsigned int neighbor_side = libMesh::invalid_uint;    // side of N coinciding with ours
+    Point translated_centroid;                             // x_N' = T^{-1}(x_N)
+    BoundaryID my_id = Moose::INVALID_BOUNDARY_ID;         // our periodic sideset
+    BoundaryID paired_id = Moose::INVALID_BOUNDARY_ID;     // partner sideset
+    explicit operator bool() const { return neighbor != nullptr; }
+  };
+
+  /**
+   * Geometric search for the periodic partner of (elem, side). Setup-time only: uses a point
+   * locator and topological_neighbor(). Returns an empty result if the side carries no
+   * periodic sideset, or if elem is a ghost whose partner is outside our halo. Errors if elem
+   * is local and the partner cannot be found (i.e. it was not ghosted).
+   */
+  PeriodicNeighborInfo findPeriodicNeighbor(const Elem & elem,
+                                            unsigned int side,
+                                            const libMesh::PeriodicBoundaries & pbs,
+                                            libMesh::PointLocatorBase & point_locator) const;
+
+  /**
+   * O(1) lookup of the periodic partner recorded in the FV face data, or nullptr if (elem, side)
+   * is not a periodic face. Valid after setupFiniteVolumeMeshData().
+   */
+  const Elem * periodicNeighbor(const Elem & elem, unsigned int side) const;
+
 protected:
   /**
    * Returns whether this mesh is allowed to read a recovery file.

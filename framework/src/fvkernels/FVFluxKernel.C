@@ -80,6 +80,12 @@ FVFluxKernel::onBoundary(const FaceInfo & fi) const
   return Moose::FV::onBoundary(*this, fi);
 }
 
+bool 
+FVFluxKernel::isPeriodic(const FaceInfo & fi) const 
+{
+  return Moose::FV::isPeriodic(*this, fi);
+}
+
 // Note the lack of quadrature point loops in the residual/jacobian compute
 // functions. This is because finite volumes currently only works with
 // constant monomial elements. We only have one quadrature point regardless of
