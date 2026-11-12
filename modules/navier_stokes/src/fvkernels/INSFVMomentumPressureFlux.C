@@ -22,12 +22,14 @@ INSFVMomentumPressureFlux::validParams()
                              "using the divergence theoreom, in the  "
                              "incompressible Navier-Stokes momentum equation.");
   params.addRequiredParam<MooseFunctorName>(NS::pressure, "The pressure");
+  //params.addParam<std::vector< BoundaryName >>("periodic_boundary_sidesets", (), "Periodic BC sidesets.");
   return params;
 }
 
 INSFVMomentumPressureFlux::INSFVMomentumPressureFlux(const InputParameters & params)
   : FVFluxKernel(params), INSFVMomentumResidualObject(*this), _p(getFunctor<ADReal>(NS::pressure))
-{
+  //_periodic_boundary_sides(getParam<std::vector<BoundaryName>>("periodic_boundary_sidesets"))
+{ 
   if (!dynamic_cast<INSFVVelocityVariable *>(&_var))
     mooseError("INSFVMomentumPressureFlux may only be used with a Navier-Stokes velocity, "
                "of variable type INSFVSuperficialVelocityVariable.");
@@ -46,8 +48,33 @@ INSFVMomentumPressureFlux::computeQpResidual()
   const auto & elem = makeElemArg(elem_ptr);
   const auto state = determineState();
 
-  if (onBoundary(*_face_info))
+  // FIXME: Whether this makes sense to change or otherwise (for periodic BC, pressure grad is 
+  // , modified here or otherwise)
+  if (onBoundary(*_face_info) && !isPeriodic(*_face_info))
     eps_p_interface = epsilon()(elem, state) * _p(singleSidedFaceArg(), state);
+  else if (isPeriodic(*_face_info))
+  { 
+    // mooseWarning("NOT IMPLEMENTED: Periodic BC requires interpolation of pressure grad flux. ");
+    // TODO: Must obtain the periodic element as neighbor here, via MooseMesh for reference
+    const auto * neighbor_ptr = _face_info->neighborPtr();
+    const auto & neighbor = makeElemArg(neighbor_ptr);
+
+    const auto * elem_ptr = _face_info->elemPtr();
+    const auto & elem = makeElemArg(elem_ptr);
+
+    // FIXME: May need to digest where is left/right of the periodic BCs here before interpolation
+
+    if (elem_ptr == nullptr or neighbor_ptr == nullptr)
+      mooseError("Periodic BC mush have both element and its neighbor defined. ");
+
+    // FIXME: Maybe modify the iterpolation here ?
+    Moose::FV::interpolate(Moose::FV::InterpMethod::Average,
+                           eps_p_interface,
+                           epsilon()(elem, state) * _p(elem, state),
+                           epsilon()(neighbor, state) * _p(neighbor, state),
+                           *_face_info,
+                           true);
+  }
   else
   {
     const auto * neighbor_ptr = use_elem ? _face_info->neighborPtr() : &_face_info->elem();

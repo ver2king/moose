@@ -72,6 +72,8 @@ BernoulliPressureVariable::BernoulliPressureVariable(const InputParameters & par
   if (_pressure_drop_sidesets.size() != _pressure_drop_form_factors.size())
     paramError("pressure_drop_sidesets",
                "The number of sidesets and the number of supplied form losses are not equal!");
+  
+  mooseInfo("[BernoulliPressureVariable].BernoulliPressureVariable: Variable's kernel. ");
 }
 
 void

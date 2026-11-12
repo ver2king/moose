@@ -1172,11 +1172,26 @@ interpolate(const FunctorBase<std::array<T, N>> & functor,
 template <typename SubdomainRestrictable>
 bool
 onBoundary(const SubdomainRestrictable & obj, const FaceInfo & fi)
-{
+{ 
+  // FIXME: If not internal then boundary, may need to determine whether periodic BC
+  // is true or false here
   const bool internal = fi.neighborPtr() && obj.hasBlocks(fi.elemSubdomainID()) &&
                         obj.hasBlocks(fi.neighborSubdomainID());
   return !internal;
 }
+
+/**
+ * Return whether the supplied face has a periodic boundary of the \p object's execution
+ */
+template<typename SubdomainRestrictable>
+bool 
+isPeriodic(const SubdomainRestrictable & obj, const FaceInfo & fi)
+{
+  // TODO: If periodic or not 
+  const bool periodic = fi.isPeriodic();
+  return periodic;
+}
+
 
 /**
  * Determine whether the passed-in face is on the boundary of an object that lives on the provided

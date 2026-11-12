@@ -35,4 +35,6 @@ protected:
 
   /// A unity functor used in the epsilon virtual method
   const Moose::ConstantFunctor<ADReal> _unity_functor{1};
+
+  const std::vector<BoundaryName> _periodic_boundary_sides;
 };

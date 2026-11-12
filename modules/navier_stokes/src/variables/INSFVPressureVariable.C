@@ -19,4 +19,5 @@ INSFVPressureVariable::validParams()
 
 INSFVPressureVariable::INSFVPressureVariable(const InputParameters & params) : INSFVVariable(params)
 {
+  //mooseInfo("[INSFVPressureVariable].INSFVPressureVariable. Variable's kernel. ");
 }
