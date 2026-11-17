@@ -52,8 +52,7 @@ protected:
   /**
    * Checks to see whether the provided element is upwind of the provided face
    * @param fi the face
-   * @return a pair in which the first member is whether the element is upwind of the face and the
-   * second member is the evaluated face superficial velocity
+   * @return true if the boundary is periodic, false otherwise 
    */
   bool
   isPeriodic(const FaceInfo & fi) const;
