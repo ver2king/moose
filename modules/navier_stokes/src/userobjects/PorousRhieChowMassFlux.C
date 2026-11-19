@@ -118,6 +118,8 @@ PorousRhieChowMassFlux::linkMomentumPressureSystems(
   // A pressure jump represents a baffle interior to the flow domain. A boundary with no
   // flow-block element on one side is a domain boundary, not a baffle. The boundary element
   // range this check needs is not yet built when this object is constructed.
+
+  /// FIXME: Might modify this in case periodic BCs exist ? 
   for (const auto * const model : _pressure_jump_models)
     for (const auto boundary_id : model->boundaryIDs())
       if (_moose_mesh.isBoundaryFullyExternalToSubdomains(boundary_id, blockIDs()))

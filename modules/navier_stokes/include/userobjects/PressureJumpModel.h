@@ -65,7 +65,7 @@ protected:
   /// Mesh used to resolve boundary names and determine pressure-jump orientation.
   MooseMesh & _moose_mesh;
 
-private:
+public:
   /// Boundary IDs on which this pressure-jump model applies.
   std::unordered_set<BoundaryID> _boundary_ids;
 };

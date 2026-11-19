@@ -77,6 +77,33 @@ using ResultItem = std::pair<T, U>;
 }
 #endif
 
+namespace multiperiodicbcs
+{
+  /// Check whether periodic boundaries for two different systems are similar
+
+  bool
+  samePeriodicBoundaries(const libMesh::PeriodicBoundaries & a,
+                       const libMesh::PeriodicBoundaries & b)
+  {
+    if (a.size() != b.size())
+      return false;
+
+    for (const auto & [id, pb] : a)
+    {
+      const auto * const other = b.boundary(id);
+      if (!other || other->pairedboundary != pb->pairedboundary)
+        return false;
+
+      // Same transformation: compare the images of a few probe points
+      for (const Point & probe : {Point(0, 0, 0), Point(1, 0, 0), Point(0, 1, 0), Point(0, 0, 1)})
+        if (!pb->get_corresponding_pos(probe).absolute_fuzzy_equals(
+              other->get_corresponding_pos(probe), libMesh::TOLERANCE))
+          return false;
+    }
+    return true;
+  }
+}
+
 const std::array<bool, 3> MooseMesh::periodic_dim_default{false, false, false};
 
 InputParameters
@@ -3847,7 +3874,7 @@ bool MooseMesh::hasPeriodicBoundaries() const
       const auto * const p = fep.getSolverSystem(i).dofMap().get_periodic_boundaries();
       if (!p || p->empty())
         continue;
-      if (pbs && pbs != p)
+      if (pbs && !multiperiodicbcs::samePeriodicBoundaries(*pbs, *p))
         mooseError("FV periodic boundaries must be identical across solver systems. ");
       pbs = p;
     }
@@ -3865,7 +3892,7 @@ const libMesh::PeriodicBoundaries * MooseMesh::getPeriodicBoundaries() const
     const auto * const p = fep.getSolverSystem(i).dofMap().get_periodic_boundaries();
     if (!p || p->empty())
       continue;
-    if (pbs && pbs != p)
+    if (pbs && !multiperiodicbcs::samePeriodicBoundaries(*pbs, *p))
       mooseError("FV periodic boundaries must be identical across solver systems. ");
     pbs = p;
   };
@@ -3996,7 +4023,7 @@ MooseMesh::buildFiniteVolumeInfo() const
       const auto * const p = fep.getSolverSystem(i).dofMap().get_periodic_boundaries();
       if (!p || p->empty())
         { mooseWarning("p.size = 0. "); continue; }
-      if (pbs && pbs != p)
+      if (pbs && !multiperiodicbcs::samePeriodicBoundaries(*pbs, *p))
         mooseError("FV periodic boundaries must be identical across solver systems. ");
       pbs = p;
     }

@@ -19,8 +19,6 @@ PeriodicPressureJump::validParams()
   auto params = PressureJumpModel::validParams();
   params.addClassDescription(
       "Provides pressure jumps for periodic BCs to PorousRhieChowMassFlux.");
-  params.addParam<std::vector<BoundaryName>>(
-        "periodic_sidesets", {}, "Sidesets over which form the periodic BCs.");
   params.addParam<std::vector<Real>>(
         "pressure_shifts", {}, "Pressure shift through the periodic BCs. ");
   params.addRelationshipManager(
@@ -34,40 +32,47 @@ PeriodicPressureJump::validParams()
 
 PeriodicPressureJump::PeriodicPressureJump(const InputParameters & params)
   : PressureJumpModel(params),
-    _periodic_sidesets(getParam<std::vector<BoundaryName>>("periodic_sidesets")),
-    _periodic_sideset_ids(this->_mesh.getBoundaryIDs(_periodic_sidesets)),
     _periodic_heads(getParam<std::vector<Real>>("pressure_shifts"))
 {
-  mooseInfo("Dimension of periodic sideset IDs = ", _periodic_sideset_ids.size());
-  for (auto id : _periodic_sideset_ids)
-  {
-    std::cerr << "Periodic sideset id = " <<  id << " is retrieved. " << std::endl;
-  };
-}
+  if (_boundary_ids.size() != 2 * _periodic_heads.size())
+    paramError("pressure_shifts", "Provide one shift per (primary, secondary) boundary pair. ");
 
-bool
-PeriodicPressureJump::isPeriodic(const FaceInfo & fi) const
-{   
-  // We must ensure any sidesets from the input parameter belong to the face info 
-  // so that isPeridic return true. Otherwise return false.
-  if (!fi.neighborPtr())
-    return false; // this is a boundary that is not periodic
+  //mooseInfo("Dimensions of boundary IDs = ", _boundary_ids.size());
+  //mooseInfo("Dimensions of pressure shifts = ", _periodic_heads.size());
 
-  const auto & binfo = _mesh.getMesh().get_boundary_info();
-  for (const auto id : _periodic_sideset_ids)
-    if (binfo.has_boundary_id(&fi.elem(), fi.elemSideID(), id) ||
-        binfo.has_boundary_id(fi.neighborPtr(), fi.neighborSideID(), id))
-      return true;
-  return false;
+  for (int i = 0 ; i < _periodic_heads.size(); ++i)
+  { 
+    auto ids_it = std::next(_boundary_ids.begin(), 2 * i);
+    auto next_ids_it = std::next(_boundary_ids.begin(), 2 * i + 1);
+    // owner on primary
+    _jump_by_owner_id[*ids_it] = -_periodic_heads[i]; 
+    // owner on secondary 
+    _jump_by_owner_id[*next_ids_it] = _periodic_heads[i]; 
+  }
 }
 
 Real
 PeriodicPressureJump::computePressureJump(const FaceInfo & fi,
-                                        const Real face_mass_flux) const
-{   
-  mooseWarning("PeriodicPressureJump does not use face_mass_flux. ");
+                                          const Real /*face_mass_flux*/) const
+{
+  mooseAssert(appliesTo(fi), "The pressure jump model must apply to the supplied face.");
+  mooseAssert(fi.isPeriodic(), "A periodic pressure jump requires a periodic face.");
 
-  const auto time = Moose::currentState();
-  Real pressure_jump = 0.;
-  return pressure_jump;
+  const bool elem_is_owner = elemIsOwner(fi);
+  const Elem * const owner = elem_is_owner ? fi.elemPtr() : fi.neighborPtr();
+  const auto owner_side = elem_is_owner ? fi.elemSideID() : fi.neighborSideID();
+
+  Real jump = 0.0;
+  unsigned int n_matches = 0;
+  for (const auto id : _moose_mesh.getBoundaryIDs(owner, owner_side))
+    if (const auto it = _jump_by_owner_id.find(id); it != _jump_by_owner_id.end())
+    {
+      jump += it->second;
+      ++n_matches;
+    }
+
+  if (n_matches != 1)
+    mooseError("Periodic face ", fi.id(), " matched ", n_matches, " periodic sidesets.");
+
+  return jump;
 }

@@ -10,6 +10,8 @@
 
 #include "PressureJumpModel.h"
 
+#include <unordered_map>
+
 /**
  * Computes the pressure gradient throughout a face for periodic BCs, via FaceInfo
  */
@@ -34,22 +36,9 @@ public:
   Real computePressureJump(const FaceInfo & fi, Real face_mass_flux) const override;
 
 private:
-
-  /**
-   * Checks to see whether the provided element is upwind of the provided face
-   * @param fi the face
-   * @return true if the boundary is periodic, false otherwise 
-   */
-  bool
-  isPeriodic(const FaceInfo & fi) const;
-
-private:
-  /// The names of the sidesets which will have associated form loss coefficients
-  std::vector<BoundaryName> _periodic_sidesets;
-
-  /// The boundary IDs corresponding to the form loss sidesets
-  const std::vector<BoundaryID> _periodic_sideset_ids;
-
   /// Pressure head lost from primary to secondary, one per pair
   const std::vector<Real> _periodic_heads;
+
+  ///
+  std::unordered_map<BoundaryID, Real> _jump_by_owner_id;
 };
