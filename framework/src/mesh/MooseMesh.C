@@ -1417,6 +1417,15 @@ MooseMesh::isBoundaryFullyExternalToSubdomains(BoundaryID bid,
       if (blk_group.find(elem_ptr->subdomain_id()) != blk_group.end())
       {
         const auto * const neighbor = elem_ptr->neighbor_ptr(elem_side);
+        //const auto elem = * elem_ptr;
+        
+        /// FIXME: this logic seems not correct as it must be placed after the last if 
+        for (const auto f : _face_info) 
+        {
+          if (f->isPeriodic())
+            crosses_subdomains = false;
+            break;
+        };
 
         // If we did not ghost the neighbor, we cannot decide
         if (neighbor == libMesh::remote_elem)
