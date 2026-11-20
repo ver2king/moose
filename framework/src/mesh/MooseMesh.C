@@ -1412,20 +1412,22 @@ MooseMesh::isBoundaryFullyExternalToSubdomains(BoundaryID bid,
   {
     const auto & [elem_ptr, elem_side, elem_bid] = *bnd_elem;
     if (elem_bid == bid && elem_ptr->processor_id() == processor_id())
-    {
+    { 
+      /// FIXME: this logic seems not correct as it must be placed after the last if 
+      for (const auto f : _face_info) 
+      {
+        if (f->isPeriodic())
+          {
+            //mooseInfo("[Assembly for PorousRhieChow]: Face info has periodic BC(s). ", f->id());
+            crosses_subdomains = true;
+            break;
+          }
+      };
+
       // If an element is internal to the group of subdomain, check the neighbor
       if (blk_group.find(elem_ptr->subdomain_id()) != blk_group.end())
       {
         const auto * const neighbor = elem_ptr->neighbor_ptr(elem_side);
-        //const auto elem = * elem_ptr;
-        
-        /// FIXME: this logic seems not correct as it must be placed after the last if 
-        for (const auto f : _face_info) 
-        {
-          if (f->isPeriodic())
-            crosses_subdomains = false;
-            break;
-        };
 
         // If we did not ghost the neighbor, we cannot decide
         if (neighbor == libMesh::remote_elem)
