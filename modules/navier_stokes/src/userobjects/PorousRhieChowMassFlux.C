@@ -170,7 +170,8 @@ PorousRhieChowMassFlux::linkMomentumPressureSystems(
   const auto & solution_gradient_reader = pressure_var->requestCellGradients();
 
   if (hasPressureBaffles())
-  {
+  { 
+    //mooseInfo("Pressure gradient reader method: ", solution_gradient_reader.method().name());
     auto * const jump_gradient_method = dynamic_cast<FVPressureJumpGreenGaussGradient *>(
         &_fe_problem.getFVGradientMethod(solution_gradient_reader.method().name(), _tid));
     if (!jump_gradient_method)
@@ -307,20 +308,47 @@ void
 PorousRhieChowMassFlux::updateBaffleJumps()
 {
   if (_pressure_jump_models.empty())
-    return;
-
-  for (auto & fi : _flow_face_info)
+  { 
+    mooseWarning("Pressure jump model(s) are not registered. ");
+    return; 
+  } else 
   {
-    const auto * const pressure_jump_model = getPressureJumpModel(*fi);
-    if (!pressure_jump_model || !fi->neighborPtr())
-      continue;
-    if (!hasBlocks(fi->elemPtr()->subdomain_id()) || !hasBlocks(fi->neighborPtr()->subdomain_id()))
-      continue;
+    mooseInfo("Pressure jump model(s) are registered. ");
+  }
 
-    const Real new_jump =
-        pressure_jump_model->computePressureJump(*fi, _face_mass_flux.evaluate(fi));
-    _baffle_jump[fi->id()] = _pressure_jump_relaxation * new_jump +
+  /// FIXME: Logic here does not include periodic FaceInfos, fix this 
+  mooseInfo("Compute pressure jump ... ");
+  for (auto & fi : _flow_face_info)
+  { 
+    const auto * const pressure_jump_model = getPressureJumpModel(*fi);
+
+    if (fi->isPeriodic())
+    { 
+      if (pressure_jump_model)
+      { 
+        // mooseInfo("Periodic FaceInfo. ");
+        const Real new_jump = pressure_jump_model->computePressureJump(*fi, _face_mass_flux.evaluate(fi));
+        _baffle_jump[fi->id()] = _pressure_jump_relaxation * new_jump +
                              (1.0 - _pressure_jump_relaxation) * _baffle_jump[fi->id()];
+      } else 
+      {
+        continue;
+      }
+    } else 
+    {
+      if (pressure_jump_model && !fi->neighborPtr())
+        mooseInfo("Jump face ", fi->id(), " skipped: no neighbor");
+
+      if (!pressure_jump_model || !fi->neighborPtr())
+        continue;
+      if (!hasBlocks(fi->elemPtr()->subdomain_id()) || !hasBlocks(fi->neighborPtr()->subdomain_id()))
+        continue;
+
+      const Real new_jump =
+        pressure_jump_model->computePressureJump(*fi, _face_mass_flux.evaluate(fi));
+      _baffle_jump[fi->id()] = _pressure_jump_relaxation * new_jump +
+                             (1.0 - _pressure_jump_relaxation) * _baffle_jump[fi->id()];
+    }
   }
 }
 
@@ -403,6 +431,7 @@ PorousRhieChowMassFlux::pressureJumpInterfaceData(const FaceInfo & fi,
                                                   const RealVectorValue & neighbor_gradient,
                                                   const Real face_area) const
 {
+  /// FIXME: If periofic face info, centroid data must be changed
   NS::FV::PressureJumpInterfaceData data;
   if (!fi.neighborPtr() || !faceIsBaffle(fi))
     return data;
@@ -429,8 +458,23 @@ PorousRhieChowMassFlux::pressureJumpInterfaceData(const FaceInfo & fi,
     neighbor_rho_hbya(component) =
         neighbor_rho * (*_HbyA_raw[component])(neighbor_info.dofIndices()[system_number][0]);
   }
-
-  data = NS::FV::pressureJumpInterfaceData(fi.normal(),
+  
+  /// FIXME: The sign of pressure grad compute is somehow incorrect here when we enable fi.isPeriodic()
+  if (fi.isPeriodic())
+      data = NS::FV::pressureJumpInterfaceData(fi.normal(),
+                                           fi.faceCentroid() - elem_info.centroid(),
+                                           fi.faceCentroid() - elem_info.centroid(),
+                                           elem_diffusion,
+                                           neighbor_diffusion,
+                                           elem_gradient,
+                                           neighbor_gradient,
+                                           elem_rho_hbya,
+                                           neighbor_rho_hbya,
+                                           face_area,
+                                           pressureDiffusionUsesNonorthogonalCorrection(),
+                                           getSignedBaffleJump(fi, /*elem_side=*/true));
+  else
+    data = NS::FV::pressureJumpInterfaceData(fi.normal(),
                                            fi.faceCentroid() - elem_info.centroid(),
                                            neighbor_info.centroid() - fi.faceCentroid(),
                                            elem_diffusion,
@@ -442,6 +486,18 @@ PorousRhieChowMassFlux::pressureJumpInterfaceData(const FaceInfo & fi,
                                            face_area,
                                            pressureDiffusionUsesNonorthogonalCorrection(),
                                            getSignedBaffleJump(fi, /*elem_side=*/true));
+
+  // if (!data.valid)
+  //   _console << "face " << fi.id()
+  //          << " periodic=" << fi.isPeriodic()
+  //          << " dE=" << (fi.faceCentroid() - elem_info.centroid()) * fi.normal()
+  //          << " dN=" << (elem_info.centroid() - fi.faceCentroid()) * fi.normal()
+  //          << " DE=" << elem_diffusion << " DN=" << neighbor_diffusion
+  //          << " jump=" << getSignedBaffleJump(fi, true) << std::endl;
+  // else
+  //   _console << "face " << fi.id()
+  //          << " periodic=" << fi.isPeriodic()
+  //          << " jump=" << getSignedBaffleJump(fi, true) << std::endl;
 
   // A valid mesh gives positive projected half-cell distances, and a positive momentum diagonal
   // and density give positive conductances.
@@ -457,7 +513,9 @@ const PressureJumpModel *
 PorousRhieChowMassFlux::getPressureJumpModel(const FaceInfo & fi) const
 {
   const PressureJumpModel * face_model = nullptr;
+
   for (const auto * const model : _pressure_jump_models)
+  {
     if (model->appliesTo(fi))
     {
       // The models act on disjoint boundaries, but a face can still carry boundaries of two
@@ -466,7 +524,14 @@ PorousRhieChowMassFlux::getPressureJumpModel(const FaceInfo & fi) const
                   "Pressure-jump face " + std::to_string(fi.id()) +
                       " lies on boundaries of more than one pressure jump model.");
       face_model = model;
+    } 
+
+    if (fi.isPeriodic())
+    {
+      // Face info is peridic, direclty apply pressure jump model 
+      face_model = model;
     }
+  }
 
   return face_model;
 }

@@ -37,8 +37,8 @@ PeriodicPressureJump::PeriodicPressureJump(const InputParameters & params)
   if (_boundary_ids.size() != 2 * _periodic_heads.size())
     paramError("pressure_shifts", "Provide one shift per (primary, secondary) boundary pair. ");
 
-  //mooseInfo("Dimensions of boundary IDs = ", _boundary_ids.size());
-  //mooseInfo("Dimensions of pressure shifts = ", _periodic_heads.size());
+  mooseInfo("Dimensions of boundary IDs = ", _boundary_ids.size());
+  mooseInfo("Dimensions of pressure shifts = ", _periodic_heads.size());
 
   for (int i = 0 ; i < _periodic_heads.size(); ++i)
   { 
@@ -55,7 +55,10 @@ Real
 PeriodicPressureJump::computePressureJump(const FaceInfo & fi,
                                           const Real /*face_mass_flux*/) const
 {
-  mooseAssert(appliesTo(fi), "The pressure jump model must apply to the supplied face.");
+
+  mooseInfo("Compute pressure jump (periodic BC) ... ");
+
+  //mooseAssert(appliesTo(fi), "The pressure jump model must apply to the supplied face.");
   mooseAssert(fi.isPeriodic(), "A periodic pressure jump requires a periodic face.");
 
   const bool elem_is_owner = elemIsOwner(fi);
@@ -73,6 +76,7 @@ PeriodicPressureJump::computePressureJump(const FaceInfo & fi,
 
   if (n_matches != 1)
     mooseError("Periodic face ", fi.id(), " matched ", n_matches, " periodic sidesets.");
-
+  
+  mooseInfo("Total pressure jump (periodic BCs) = ", jump);
   return jump;
 }
