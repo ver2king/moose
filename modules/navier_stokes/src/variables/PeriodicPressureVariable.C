@@ -75,6 +75,14 @@ PeriodicPressureVariable::initialSetup()
   _console << "[PeriodicPressureVariable] tagged internal faces: " << n_tagged_internal
            << ", tagged boundary faces: " << n_tagged_boundary
            << ", periodic faces: " << n_periodic << std::endl;  
+
+  // /// FIXME: Debug the pressure/velocity flux, remove later
+  // const auto state = Moose::currentState();
+  // for (const auto id : {0, 1, 48, 49})
+  //   _console << "cell " << id << " grad p_x = "
+  //          << MetaPhysicL::raw_value(
+  //                 INSFVPressureVariable::adGradSln(_mesh.elemPtr(id), state, false)(0))
+  //          << std::endl;
 }
 
 bool
@@ -201,7 +209,7 @@ PeriodicPressureVariable::getDirichletBoundaryFaceValue(const FaceInfo & fi,
   Real shift = 0.0;
   unsigned int n_matches = 0;
   for (const auto i : index_range(_periodic_sideset_ids))
-    if (binfo.has_boundary_id(elem, my_side, _periodic_sideset_ids[i]))
+    if (binfo.has_boundary_id(me, my_side, _periodic_sideset_ids[i]))
     {
       const bool me_on_primary = (i % 2 == 0);
       // p(secondary) = p(primary) - head: bring the far cell into my frame
@@ -225,6 +233,7 @@ PeriodicPressureVariable::adGradSln(const FaceInfo & fi,
   if (!isPeriodic(fi))
     return INSFVPressureVariable::adGradSln(fi, time, correct_skewness);
 
+  /// FIXME: Possibly re-check this for 2D 
   const Elem * const elem = &fi.elem();
   const Elem * const neighbor = fi.neighborPtr();
 
